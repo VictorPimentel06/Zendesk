@@ -1,9 +1,14 @@
+
+# Modulos Basicos
 import env
 import datetime
 import requests
 import os
 import json
 
+
+# Dev Modules
+from utils.redshift_utils import RedShift
 
 class Zendesk_support(): 
     def __init__(self): 
@@ -44,13 +49,15 @@ class Zendesk_support():
             if url == data['next_page']:
                 break
             url = data["next_page"]
-            print(len(tickets))
+            
+motor = RedShift(schema= "salesforce").engine
+response = motor.execute("SELECT count(*) from lead;")         
+for i in response: 
+    print(i)
             
             
-            
 
 
 
 
-
-Zendesk_support().Tickets(fecha = "2020-01-01",tipo = "partial")
+# Zendesk_support().Tickets(fecha = "2020-01-01",tipo = "partial")
