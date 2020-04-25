@@ -8,7 +8,7 @@ import json
 
 
 # Dev Modules
-from utils.redshift_utils import RedShift
+from utils  import RedShift
 
 class Zendesk_support(): 
     def __init__(self): 
@@ -28,18 +28,21 @@ class Zendesk_support():
         """
         tickets = []
         if tipo == "complete": 
-            fecha = int(datetime.datetime.strftime("2018-01-01","%Y-%m-%d").timestamp())
+            fecha = int(datetime.datetime.strptime("2018-01-01","%Y-%m-%d").timestamp())
             response = requests.get(self.incremental + str(fecha), auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            if response.status_code != 200: 
+                print("Error en la extraccion. CodeError: "+ str(response.status_code))
             data = response.json()
-            tickets.extend(response['tickets'])
+            tickets.extend(data['tickets'])
+            url = data['next_page']
         if tipo == "partial": 
             fecha = int(datetime.datetime.strptime(fecha, "%Y-%m-%d").timestamp())
             response = requests.get(self.incremental + str(fecha), auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
                 print("Error en la extraccion. CodeError: "+ str(response.status_code))
             data = response.json()
-            url = data['next_page']
             tickets.extend(data['tickets'])
+            url = data['next_page']
         while url: 
             response = requests.get(url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
@@ -49,15 +52,10 @@ class Zendesk_support():
             if url == data['next_page']:
                 break
             url = data["next_page"]
-            
-motor = RedShift(schema= "salesforce").engine
-response = motor.execute("SELECT count(*) from lead;")         
-for i in response: 
-    print(i)
-            
+            print(len(tickets))
             
 
 
 
 
-# Zendesk_support().Tickets(fecha = "2020-01-01",tipo = "partial")
+Zendesk_support().Tickets(fecha = "2020-04-15",tipo = "partial")
