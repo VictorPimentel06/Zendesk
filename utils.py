@@ -10,29 +10,41 @@ class RedShift():
                                                                                                         base = os.environ['REDSHIFT_DATABASE'],
                                                                                                         host = os.environ['REDSHIFT_HOST'],
                                                                                                         port = os.environ['REDSHIFT_PORT']),
-                                                                                                        connect_args={'sslmode': 'prefer',
-                                                                                                                      'options': '-csearch_path={}'.format(schema)},
-                                                                                                    echo = False, encoding = 'utf8')
+                                                                                                        connect_args = {'sslmode': 'prefer','options': '-csearch_path={}'.format(schema)},
+                                                                                                        echo = False, encoding = 'utf8')
 
-class Upload_S3() :
-    def __init__(self, Dataframe, name, tipo) :
+class Upload_Redshift() :
+    def __init__(self, Dataframe, name, carpeta, bucket, engine) :
         """
         Clase que recibe como argumento un dataframe object de pandas
+
+        - Dataframe: Dataframe de pandas 
+        - Folder: carpeta dentro de bucket
+        - Name: nombre del documento. Este debe tener extension .csv 
+            ejemplo: 
+                "prueba.csv"
+        - bucket: bucket de AWS
         """
         s3 = boto3.client("s3",
-            aws_access_key_id = self.access_key,
-            aws_secret_access_key = self.secret_access_key)
+            aws_access_key_id = os.environ["AWS_KEY"],
+            aws_secret_access_key = os.environ["AWS_SECRET_KEY"])
         csv_buffer = StringIO()
         Dataframe.to_csv(csv_buffer, index = False)
-
-        folder = str(tipo) + "/" +str(name)
-        if tipo == "call_records": 
-            folder = "call_records/{}".format(name)
-        if tipo == "calls": 
-            folder = "calls/{}".format(name)
-        if tipo == "users": 
-            folder = "users/{}".format(name)
-        s3.put_object(Bucket = "salesloft-runa",Key = folder, Body = csv_buffer.getvalue())
+        folder = str(carpeta) + "/" +str(name)+'.csv'
+        s3.put_object(Bucket = bucket, Key = folder, Body = csv_buffer.getvalue())
+    
+        cols = Dataframe.columns
+        with engine.connect() as conn :
+            conn.execute("COPY {schema}.{table} ({cols}) FROM '{s3}' WITH CREDENTIALS 'aws_access_key_id={keyid};aws_secret_access_key={secretid}' CSV IGNOREHEADER 1 EMPTYASNULL;commit;".format(schema = os.environ['REDSHIFT_SCHEMA'], 
+                                                                                                                                                                                                    table = name,
+                                                                                                                                                                                                    cols = ', '.join(cols[j] for j in range( len(cols) ) ),
+                                                                                                                                                                                                    s3='s3://{}/{}/{}'.format(os.environ['AWS_BUCKET'],
+                                                                                                                                                                                                                              carpeta,
+                                                                                                                                                                                                                              name+".csv"),
+                                                                                                                                                                                                    keyid = os.environ['AWS_KEY'],
+                                                                                                                                                                                                    secretid= os.environ['AWS_SECRET_KEY']))
+        
+    
 
 class clean(): 
     @staticmethod

@@ -9,7 +9,7 @@ import pandas as pd
 
 
 # Dev Modules
-from utils import RedShift, clean, Initialize, New_columns
+from utils import RedShift, clean, Initialize, New_columns, Upload_Redshift
 
 class Zendesk_support(RedShift): 
     def __init__(self): 
@@ -63,12 +63,15 @@ class Zendesk_support(RedShift):
         if tipo == "complete": 
             # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
             # para insertarlas. 
-            Initialize("ticket", self.engine)
-            New_columns(tabla, "ticket", self.engine)
-        New_columns(tabla, "ticket", self.engine)
+            Initialize("tickets", self.engine)
+            New_columns(tabla, "tickets", self.engine)
+            Upload_Redshift(tabla,"tickets", "zendesk_support","zendesk-runahr",self.engine)
+        if tipo == "partial": 
+            New_columns(tabla, "tickets", self.engine)
+            Upload_Redshift(tabla,"tickets", "zendesk_support","zendesk-runahr",self.engine)
         
         
         
 
 if __name__ == "__main__": 
-    Zendesk_support().Tickets(fecha = "2020-04-20",tipo = "partial")
+    Zendesk_support().Tickets(fecha = "2020-04-25",tipo = "complete")
