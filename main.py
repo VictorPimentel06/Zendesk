@@ -5,16 +5,18 @@ import datetime
 import requests
 import os
 import json
+import pandas as pd 
 
 
 # Dev Modules
-from utils  import RedShift
+from utils import RedShift, clean, Initialize, New_columns
 
-class Zendesk_support(): 
+class Zendesk_support(RedShift): 
     def __init__(self): 
         """
         Extraccion de tickets desde Zendesk Support.
         """
+        super().__init__()
         self.incremental = "https://runahr.zendesk.com/api/v2/incremental/tickets.json?start_time="
 
     def Tickets(self, fecha = None, tipo = "complete"): 
@@ -24,7 +26,7 @@ class Zendesk_support():
         Fecha: Valor en timestamp desde la cual se hara la extraccion. 
         tipo : 
             - complete: Extraccion de la totalidad de los tickets desde el primero de enero de 2018. 
-            - extraccion: se tomara el valor de la fecha de entrada para hacer la extraccion. 
+            - partial: se tomara el valor de la fecha de entrada para hacer la extraccion. 
         """
         tickets = []
         if tipo == "complete": 
@@ -51,11 +53,22 @@ class Zendesk_support():
             tickets.extend(data['tickets'])
             if url == data['next_page']:
                 break
+            print("Numero de tickets extraidos: {}".format(len(tickets)))
             url = data["next_page"]
-            print(len(tickets))
-            
+        tabla = pd.io.json.json_normalize(tickets)
+        tabla = clean.fix_columns(tabla)
+        # Generar lista de columnas para generar otra tabla
+        column_list =  clean.column_list(tabla)
+        tabla = tabla.drop([str(i) for i in column_list], axis = 1)
+        if tipo == "complete": 
+            # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
+            # para insertarlas. 
+            Initialize("ticket", self.engine)
+            New_columns(tabla, "ticket", self.engine)
+        New_columns(tabla, "ticket", self.engine)
+        
+        
+        
 
-
-
-
-Zendesk_support().Tickets(fecha = "2020-04-15",tipo = "partial")
+if __name__ == "__main__": 
+    Zendesk_support().Tickets(fecha = "2020-04-20",tipo = "partial")
