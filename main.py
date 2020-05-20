@@ -17,7 +17,7 @@ class Zendesk_support(RedShift):
         Extraccion de tickets desde Zendesk Support.
         """
         super().__init__()
-        self.incremental = "https://runahr.zendesk.com/api/v2/incremental/tickets.json?start_time="
+        self.incremental = "https://runahr.zendesk.com/api/v2/incremental/tickets.json"
         self.tipo = tipo
         self.fecha = fecha
         
@@ -38,6 +38,12 @@ class Zendesk_support(RedShift):
                 self.__orgs_extract()
             except: 
                 print("Errores en la extraccion de organizaciones")
+                exit()
+        if table == "comments": 
+            try: 
+                self.__extract_comments()
+            except: 
+                print("Errores en la extraccion de comentarios")
                 exit()
 
     def __tickets_extract(self): 
@@ -61,7 +67,8 @@ class Zendesk_support(RedShift):
             url = data['next_page']
         if self.tipo == "partial": 
             fecha = int(datetime.datetime.strptime(self.fecha, "%Y-%m-%d").timestamp())
-            response = requests.get(self.incremental + str(fecha), auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            url = self.incremental + str("?start_time=")+ str(fecha)+ str("&include=comment_events")
+            response = requests.get(url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
                 print("Error en la extraccion. CodeError: "+ str(response.status_code))
             data = response.json()
@@ -251,11 +258,55 @@ class Zendesk_support(RedShift):
                 New_columns(final_table, "orgs_tags", self.engine)
                 Upload_Redshift(final_table,"orgs_tags", "zendesk_support","zendesk-runahr",self.engine)
             self.orgs_tags =final_table
-        
+    def Orgs_domains(self): 
+        tabla = self.orgs_table 
+        tabla = tabla[["domain_names","id"]]
+        final_table = pd.DataFrame()
+        for index, row in tabla.iterrows(): 
+            if len(row['domain_names']) == 0:
+                pass
+            else: 
+                id = row['id']
+                tags = row['domain_names']
+                inter_table = pd.DataFrame(tags, columns= ['domain_names'])
+                inter_table['id'] = [id for i in range(len(inter_table)) ]
+                final_table = final_table.append(inter_table)
+        try: 
+            final_table.reset_index(inplace= True,drop= True )
+        except: 
+            pass
+        if len(final_table) == 0: 
+            self.orgs_table = final_table
+        else: 
+            if self.tipo == "complete": 
+                # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
+                # para insertarlas. 
+                Initialize("orgs_domains", self.engine)
+                New_columns(final_table, "orgs_domains", self.engine)
+                Upload_Redshift(final_table,"orgs_domains", "zendesk_support","zendesk-runahr",self.engine)
+            if self.tipo == "partial": 
+                New_columns(final_table, "orgs_domains", self.engine)
+                Upload_Redshift(final_table,"orgs_domains", "zendesk_support","zendesk-runahr",self.engine)
+            self.orgs_domains =final_table
+        return self
+
+    def __extract_comments(self): 
+        """
+        Se hace a traves de los ids de los tickets que ya estan creados en Zendesk. 
+        """
+        response = self.engine.execute("SELECT id from zendesk.tickets")
+        array = [i[0] for i in response]
+        prueba = array[:10]
+        for ticket in prueba: 
+            respuesta = requests.get("https://runahr.zendesk.com/api/v2/tickets/{}/comments.json".format(ticket), 
+                                    auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            print(respuesta.status_code, respuesta.text)
+            
         
 
 
 if __name__ == "__main__": 
-    instance = Zendesk_support(fecha = "2020-05-01",tipo = "complete", table = "organizations")
-    instance.Orgs_tags()
+    instance = Zendesk_support(fecha = "2020-05-15",tipo = "partial", table = "comments")
+    # print(instance.tickets_table)
+    # instance.Orgs_domains()
     
