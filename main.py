@@ -6,6 +6,7 @@ import requests
 import os
 import json
 import pandas as pd 
+import time
 
 
 # Dev Modules
@@ -293,20 +294,44 @@ class Zendesk_support(RedShift):
     def __extract_comments(self): 
         """
         Se hace a traves de los ids de los tickets que ya estan creados en Zendesk. 
+        Solo se insertaran los datos de body, created_at, id, y si el comentario es publico o no. 
         """
         response = self.engine.execute("SELECT id from zendesk.tickets")
         array = [i[0] for i in response]
-        prueba = array[:10]
-        for ticket in prueba: 
+        final_table = pd.DataFrame()
+        for ticket in array: 
             respuesta = requests.get("https://runahr.zendesk.com/api/v2/tickets/{}/comments.json".format(ticket), 
-                                    auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
-            print(respuesta.status_code, respuesta.text)
+                                auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            if respuesta.status_code != 200: 
+                print(respuesta.text)
+                continue
+            data = respuesta.json()
+            comments = data["comments"]
+            ticket_comments = pd.DataFrame(comments)
+            ticket_comments = ticket_comments[["body", "created_at", "id", "public"]]
+            ticket_comments["ticket_id"] = ticket
+            final_table = final_table.append(ticket_comments)
+            time.sleep(0.01)
+            print(len(final_table))
+            if len(final_table) % 1000 == 0: 
+                print("Tickets extraidos hasta ahora: " + str(len(final_table)))
+        final_table.reset_index(inplace= True,drop= True )
+        if self.tipo == "complete": 
+            # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
+            # para insertarlas. 
+            Initialize("ticket_comments", self.engine)
+            New_columns(final_table, "ticket_comments", self.engine)
+            Upload_Redshift(final_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
+        if self.tipo == "partial": 
+            New_columns(final_table, "ticket_comments", self.engine)
+            Upload_Redshift(final_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
+        return self
             
         
 
 
 if __name__ == "__main__": 
-    instance = Zendesk_support(fecha = "2020-05-15",tipo = "partial", table = "comments")
+    instance = Zendesk_support(fecha = "2020-05-20",tipo = "complete", table = "comments")
     # print(instance.tickets_table)
     # instance.Orgs_domains()
     
