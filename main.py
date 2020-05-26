@@ -7,6 +7,7 @@ import os
 import json
 import pandas as pd 
 import time
+from pandas.io.json import json_normalize
 
 
 # Dev Modules
@@ -46,6 +47,12 @@ class Zendesk_support(RedShift):
             except: 
                 print("Errores en la extraccion de comentarios")
                 exit()
+        if table == "fields": 
+            try: 
+                self.__extract_custom_fields()
+            except: 
+                print("Errores en la extraccion")
+                exit()
 
     def __tickets_extract(self): 
         """
@@ -57,10 +64,66 @@ class Zendesk_support(RedShift):
             - complete: Extraccion de la totalidad de los tickets desde el primero de enero de 2018. 
             - partial: se tomara el valor de la fecha de entrada para hacer la extraccion. 
         """
+        def extract_custom_fields(): 
+            self.custom_fields_url = "https://runahr.zendesk.com/api/v2/ticket_fields.json"
+            respuesta = requests.get(self.custom_fields_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            data = respuesta.json()
+            fields = data["ticket_fields"]
+            dic = {}
+            for i in fields: 
+                dic.update({i["id"]:
+                                {
+                                "Name":i["raw_title_in_portal"], 
+                                "Description":i["description"],
+                                "Raw Description": i["raw_description"],
+                                "Created_at": i["created_at"], 
+                                "removable": i["removable"] # ir removable == False entonces es uncampo de sistema.  
+                                }
+                        })
+            return  dic
+        self.dic_fields = extract_custom_fields()
+        def add_field(tickets_table):
+            dic = {}
+            for ticket, fields in zip(tickets_table.id, tickets_table.custom_fields): 
+                for field in fields: 
+                    if ticket not in dic: 
+                        dic.update(
+                            {ticket: 
+                                {
+                                    field["id"]:
+                                        {
+                                        "value": field["value"],
+                                        "name":self.dic_fields[field["id"]]["Name"]
+                                        }
+                                }
+                                })
+                    else: 
+                        dic[ticket].update(
+                                {
+                                    field["id"]:
+                                        {
+                                        "value": field["value"],
+                                        "name":self.dic_fields[field["id"]]["Name"]
+                                        }
+                                }
+                        )
+
+            tabla = pd.DataFrame.from_dict(dic).T
+            for column in tabla.columns: 
+                nombre = "Custom_" + str(tabla[column].iloc[0]["name"])
+                tabla = tabla.rename(columns = {column: nombre})
+                aux = []
+                for record in tabla[nombre]: 
+                    aux.append(record["value"])
+                tabla[nombre] = aux
+            tabla.reset_index(inplace= True)
+            tabla = tabla.rename(columns = {"index": "ticket_id"})
+            tabla = tabla.merge(tickets_table, left_on = "ticket_id", right_on= "id")
+            return tabla
         tickets = []
         if self.tipo == "complete": 
             fecha = int(datetime.datetime.strptime("2018-01-01","%Y-%m-%d").timestamp())
-            response = requests.get(self.incremental + str(fecha), auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            response = requests.get(self.incremental + str("?start_time=")+ str(fecha), auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
                 print("Error en la extraccion. CodeError: "+ str(response.status_code))
             data = response.json()
@@ -68,7 +131,7 @@ class Zendesk_support(RedShift):
             url = data['next_page']
         if self.tipo == "partial": 
             fecha = int(datetime.datetime.strptime(self.fecha, "%Y-%m-%d").timestamp())
-            url = self.incremental + str("?start_time=")+ str(fecha)+ str("&include=comment_events")
+            url = self.incremental + str("?start_time=")+ str(fecha)
             response = requests.get(url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
                 print("Error en la extraccion. CodeError: "+ str(response.status_code))
@@ -76,6 +139,7 @@ class Zendesk_support(RedShift):
             tickets.extend(data['tickets'])
             url = data['next_page']
         while url: 
+            time.sleep(0.5)
             response = requests.get(url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
                 print("Error en la extraccion. CodeError: "+ str(response.status_code))
@@ -86,8 +150,11 @@ class Zendesk_support(RedShift):
             print("Numero de tickets extraidos: {}".format(len(tickets)))
             url = data["next_page"]
         tabla = pd.io.json.json_normalize(tickets)
+        tabla = add_field(tabla)
         tabla = clean.fix_columns(tabla)
         self.tickets_table = tabla
+
+
 
     def Tickets(self):
         tabla = self.tickets_table
@@ -311,27 +378,38 @@ class Zendesk_support(RedShift):
             ticket_comments = ticket_comments[["body", "created_at", "id", "public"]]
             ticket_comments["ticket_id"] = ticket
             final_table = final_table.append(ticket_comments)
-            time.sleep(0.01)
-            print(len(final_table))
             if len(final_table) % 1000 == 0: 
                 print("Tickets extraidos hasta ahora: " + str(len(final_table)))
         final_table.reset_index(inplace= True,drop= True )
+        self.Comments_table = final_table
+    def Comments(self): 
         if self.tipo == "complete": 
             # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
             # para insertarlas. 
             Initialize("ticket_comments", self.engine)
-            New_columns(final_table, "ticket_comments", self.engine)
-            Upload_Redshift(final_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
+            New_columns(self.Comments_table, "ticket_comments", self.engine)
+            Upload_Redshift(self.Comments_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
         if self.tipo == "partial": 
-            New_columns(final_table, "ticket_comments", self.engine)
-            Upload_Redshift(final_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
+            New_columns(self.Comments_table, "ticket_comments", self.engine)
+            Upload_Redshift(self.Comments_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
         return self
-            
-        
-
 
 if __name__ == "__main__": 
-    instance = Zendesk_support(fecha = "2020-05-20",tipo = "complete", table = "comments")
-    # print(instance.tickets_table)
-    # instance.Orgs_domains()
+    tickets = Zendesk_support(fecha = "2020-05-24",tipo = "complete", table = "tickets")
+    tickets.Tickets()
+
+
+    
+    #     if ticket in dic: clear
+    #         pass
+    #     else: 
+    #         for field in fields:
+
+    #                 dic[ticket] = dic[ticket] + [tickets.dic_fields[field["id"]]]
+    #             else: 
+    #                 dic.update({ticket:[tickets.dic_fields[field["id"]]]}) 
+    
+    # for i in dic: 
+    #     print(dic[i], i)
+    #     print()
     

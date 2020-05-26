@@ -57,6 +57,7 @@ class clean():
                 col_new = col_new.replace(".","_")
             else: 
                 col_new = col.replace(".", "_")
+                col_new = col_new.replace(" ", "_")
             datos = datos.rename(columns = {col:col_new})
         return datos
     @staticmethod
