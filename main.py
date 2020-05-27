@@ -414,8 +414,6 @@ class Zendesk_support(RedShift):
             audits.append(data["audits"])
             next_url = data["before_url"]
             print(len(audits))
-#         import pickle
-#         pickle.dump( audits, open( "save.p", "w" ) )
         dic = []
         for request in audits: 
             for audit in request: 
@@ -424,12 +422,12 @@ class Zendesk_support(RedShift):
                 for evento in audit["events"]: 
                     if evento["type"] == "Change" and evento["field_name"] != "tags": 
                         dic.append([evento["field_name"], evento["value"], evento["previous_value"], id, created_at])
-
         tabla = pd.DataFrame(dic, columns = ["field_name", "value", "previous_value", "id", "updated_at"])
         self.tabla_field_history = tabla
-#         import pickle
-#         pickle.dump(tabla, open("save.p", "wb"))
     def field_history(self): 
+        """
+        La tabla de field_history no incluye a los tickets que esten archivados. 
+        """
         if self.tipo == "complete": 
             # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
             # para insertarlas. 
