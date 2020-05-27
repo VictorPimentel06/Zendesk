@@ -53,6 +53,12 @@ class Zendesk_support(RedShift):
             except: 
                 print("Errores en la extraccion")
                 exit()
+        if table == "ticket_history": 
+            try: 
+                self.__extract_tickets_audits()
+            except: 
+                print("Errores en la extracion")
+                exit()
 
     def __tickets_extract(self): 
         """
@@ -81,7 +87,6 @@ class Zendesk_support(RedShift):
                                 }
                         })
             return  dic
-        self.dic_fields = extract_custom_fields()
         def add_field(tickets_table):
             dic = {}
             for ticket, fields in zip(tickets_table.id, tickets_table.custom_fields): 
@@ -120,6 +125,10 @@ class Zendesk_support(RedShift):
             tabla = tabla.rename(columns = {"index": "ticket_id"})
             tabla = tabla.merge(tickets_table, left_on = "ticket_id", right_on= "id")
             return tabla
+
+        #Extraccion de campos adicionales
+        self.dic_fields = extract_custom_fields()
+
         tickets = []
         if self.tipo == "complete": 
             fecha = int(datetime.datetime.strptime("2018-01-01","%Y-%m-%d").timestamp())
@@ -139,7 +148,6 @@ class Zendesk_support(RedShift):
             tickets.extend(data['tickets'])
             url = data['next_page']
         while url: 
-            time.sleep(0.5)
             response = requests.get(url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
             if response.status_code != 200: 
                 print("Error en la extraccion. CodeError: "+ str(response.status_code))
@@ -153,7 +161,6 @@ class Zendesk_support(RedShift):
         tabla = add_field(tabla)
         tabla = clean.fix_columns(tabla)
         self.tickets_table = tabla
-
 
 
     def Tickets(self):
@@ -393,12 +400,50 @@ class Zendesk_support(RedShift):
             New_columns(self.Comments_table, "ticket_comments", self.engine)
             Upload_Redshift(self.Comments_table,"ticket_comments", "zendesk_support","zendesk-runahr",self.engine)
         return self
+    
+    def __extract_tickets_audits(self): 
+        self.audits_url = "https://runahr.zendesk.com/api/v2/ticket_audits.json"
+        response = requests.get(self.audits_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+        data = response.json()
+        next_url = data["before_url"]
+        audits = []
+        audits.append(data["audits"])
+        while next_url != None : 
+            response = requests.get(next_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            data = response.json()
+            audits.append(data["audits"])
+            next_url = data["before_url"]
+            print(len(audits))
+#         import pickle
+#         pickle.dump( audits, open( "save.p", "w" ) )
+        dic = []
+        for request in audits: 
+            for audit in request: 
+                id = audit["ticket_id"]
+                created_at = audit["created_at"]
+                for evento in audit["events"]: 
+                    if evento["type"] == "Change" and evento["field_name"] != "tags": 
+                        dic.append([evento["field_name"], evento["value"], evento["previous_value"], id, created_at])
 
+        tabla = pd.DataFrame(dic, columns = ["field_name", "value", "previous_value", "id", "updated_at"])
+        self.tabla_field_history = tabla
+#         import pickle
+#         pickle.dump(tabla, open("save.p", "wb"))
+    def field_history(self): 
+        if self.tipo == "complete": 
+            # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
+            # para insertarlas. 
+            Initialize("field_history", self.engine)
+            New_columns(self.tabla_field_history, "field_history", self.engine)
+            Upload_Redshift(self.tabla_field_history,"field_history", "zendesk_support","zendesk-runahr",self.engine)
+        if self.tipo == "partial": 
+            New_columns(self.tabla_field_history, "field_history", self.engine)
+            Upload_Redshift(self.tabla_field_history,"field_history", "zendesk_support","zendesk-runahr",self.engine)
+        return self
+        
 if __name__ == "__main__": 
-    tickets = Zendesk_support(fecha = "2020-05-24",tipo = "complete", table = "tickets")
-    tickets.Tickets()
-
-
+    tickets = Zendesk_support(fecha = "2020-05-24",tipo = "complete", table = "ticket_history")
+    tickets.field_history()
     
     #     if ticket in dic: clear
     #         pass
