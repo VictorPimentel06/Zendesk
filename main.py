@@ -47,17 +47,35 @@ class Zendesk_support(RedShift):
             except: 
                 print("Errores en la extraccion de comentarios")
                 exit()
-        if table == "fields": 
-            try: 
-                self.__extract_custom_fields()
-            except: 
-                print("Errores en la extraccion")
-                exit()
         if table == "ticket_history": 
             try: 
                 self.__extract_tickets_audits()
             except: 
                 print("Errores en la extracion")
+                exit()
+        if table == "field_option": 
+            try: 
+                self.__extract_field_options()
+            except: 
+                print("Errores en la extracion")
+                exit()
+        if table == "tag_history": 
+            try: 
+                self.__extract_tag_history()
+            except: 
+                print("Errores en la extraccion")
+                exit()
+        if table == "groups": 
+            try: 
+                self.extract_groups()
+            except: 
+                print("Errores en la extraccion")
+                exit()
+        if table == "group_members": 
+            try: 
+                self.extract_group_members()
+            except: 
+                print("Errores en la extraccion")
                 exit()
 
     def __tickets_extract(self): 
@@ -83,7 +101,7 @@ class Zendesk_support(RedShift):
                                 "Description":i["description"],
                                 "Raw Description": i["raw_description"],
                                 "Created_at": i["created_at"], 
-                                "removable": i["removable"] # ir removable == False entonces es uncampo de sistema.  
+                                "removable": i["removable"] # if removable == False entonces es uncampo de sistema.  
                                 }
                         })
             return  dic
@@ -126,8 +144,19 @@ class Zendesk_support(RedShift):
             tabla = tabla.merge(tickets_table, left_on = "ticket_id", right_on= "id")
             return tabla
 
-        #Extraccion de campos adicionales
+        # Creacion de tabla catalogo de los custom fields siempre se actualizara por completo
         self.dic_fields = extract_custom_fields()
+        tabla = []
+        for i in self.dic_fields.keys(): 
+            aux = self.dic_fields[i]
+            tabla.append(aux)
+        tabla = pd.DataFrame(tabla)
+        tabla["id"] = [i for i in self.dic_fields.keys()]
+        tabla = clean.fix_columns(tabla)
+        self.fields_table = tabla
+        Initialize("custom_fields", self.engine)
+        New_columns(tabla, "custom_fields", self.engine)
+        Upload_Redshift(tabla,"custom_fields", "zendesk_support","zendesk-runahr",self.engine)
 
         tickets = []
         if self.tipo == "complete": 
@@ -438,21 +467,103 @@ class Zendesk_support(RedShift):
             New_columns(self.tabla_field_history, "field_history", self.engine)
             Upload_Redshift(self.tabla_field_history,"field_history", "zendesk_support","zendesk-runahr",self.engine)
         return self
-        
-if __name__ == "__main__": 
-    tickets = Zendesk_support(fecha = "2020-05-24",tipo = "complete", table = "ticket_history")
-    tickets.field_history()
     
-    #     if ticket in dic: clear
-    #         pass
-    #     else: 
-    #         for field in fields:
+    def __extract_field_options(self): 
+        self.custom_fields_url = "https://runahr.zendesk.com/api/v2/ticket_fields.json"
+        respuesta = requests.get(self.custom_fields_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+        data = respuesta.json()
+        fields = data["ticket_fields"]
+        tabla = []
+        for field in fields: 
+            if "custom_field_options" in field.keys():
+                data = field["custom_field_options"]
+                for entry in data: 
+                    tabla.append(entry)
+        tabla = pd.DataFrame(tabla)
+        tabla = clean.fix_columns(tabla)
+        self.table_fields_options = tabla
 
-    #                 dic[ticket] = dic[ticket] + [tickets.dic_fields[field["id"]]]
-    #             else: 
-    #                 dic.update({ticket:[tickets.dic_fields[field["id"]]]}) 
+    def field_options(self): 
+        if self.tipo == "complete": 
+            # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
+            # para insertarlas. 
+            Initialize("field_option", self.engine)
+            New_columns(self.table_fields_options, "field_option", self.engine)
+            Upload_Redshift(self.table_fields_options,"field_option", "zendesk_support","zendesk-runahr",self.engine)
+        if self.tipo == "partial": 
+            New_columns(self.table_fields_options, "field_option", self.engine)
+            Upload_Redshift(self.table_fields_options,"field_option", "zendesk_support","zendesk-runahr",self.engine)
     
-    # for i in dic: 
-    #     print(dic[i], i)
-    #     print()
+    def __extract_tag_history(self): 
+        self.tag_history_url = "https://runahr.zendesk.com/api/v2/ticket_audits.json"
+        response = requests.get(self.tag_history_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+        data = response.json()
+        next_url = data["before_url"]
+        tags = []
+        tags.append(data["audits"])
+        counter = 0
+        while next_url != None and counter < 1: 
+            response = requests.get(next_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+            data = response.json()
+            tags.append(data["audits"])
+            next_url = data["before_url"]
+            print(len(tags))
+            counter += 1
+            tabla = pd.DataFrame()
+        for request in tags: 
+            for audit in request: 
+                id = audit["ticket_id"]
+                created_at = audit["created_at"]
+                for evento in audit["events"]: 
+                    if evento["type"] == "Change" and evento["field_name"] == "tags": 
+                        aux = pd.DataFrame(evento["value"])
+                        aux["id"] = id
+                        aux["updated"] = created_at
+                        tabla =  tabla.append(aux)
+        tabla.rename(columns = {0: "tag"}, inplace = True)
+        tabla = tabla.reset_index(drop = True)
+        tabla = clean.fix_columns(tabla)
+        self.tabla_tag_history = tabla
+    def tag_history(self): 
+        if self.tipo == "complete": 
+            # Borra la tabla anterior e inicializa una nueva con solo un ID, posteriormente comprueba las nuevas columnas 
+            # para insertarlas. 
+            Initialize("tag_history", self.engine)
+            New_columns(self.tabla_tag_history, "tag_history", self.engine)
+            Upload_Redshift(self.tabla_tag_history,"tag_history", "zendesk_support","zendesk-runahr",self.engine)
+        if self.tipo == "partial": 
+            New_columns(self.tabla_tag_history, "tag_history", self.engine)
+            Upload_Redshift(self.tabla_tag_history,"tag_history", "zendesk_support","zendesk-runahr",self.engine)
+    def extract_groups(self): 
+        self.groups_url = "https://runahr.zendesk.com/api/v2/groups.json"
+        response = requests.get(self.groups_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+        tabla = []
+        for i in response.json()["groups"]:
+            tabla.append(i)
+        tabla = clean.fix_columns(pd.DataFrame(tabla))
+        self.table_groups = tabla
+        Initialize("groups", self.engine)
+        New_columns(self.table_groups, "groups", self.engine)
+        Upload_Redshift(self.table_groups,"groups", "zendesk_support","zendesk-runahr",self.engine)
+        return self
     
+    def extract_group_members(self): 
+        self.groups_members_url = "https://runahr.zendesk.com/api/v2/group_memberships.json"
+        response = requests.get(self.groups_members_url, auth = (os.environ["ZENDESK_USER"], os.environ["ZENDESK_PASSWORD"]))
+        data = response.json()
+        tabla= []
+        for user in data["group_memberships"]: 
+            tabla.append(user)
+        tabla = clean.fix_columns(pd.DataFrame(tabla))
+        self.table_groups_members = tabla
+        Initialize("groups_members", self.engine)
+        New_columns(self.table_groups_members, "groups_members", self.engine)
+        Upload_Redshift(self.table_groups_members,"groups_members", "zendesk_support","zendesk-runahr",self.engine)
+        return self
+            
+               
+            
+if __name__ == "__main__": 
+    tickets = Zendesk_support(fecha = "2020-05-24",tipo = "complete", table = "group_members")
+ 
+

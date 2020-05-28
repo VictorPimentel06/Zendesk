@@ -49,7 +49,7 @@ class Upload_Redshift() :
 class clean(): 
     @staticmethod
     def fix_columns(datos) :
-        NOT_SUPPORT_COLUMN_NAMES = ["from", "to", "user", "group"]
+        NOT_SUPPORT_COLUMN_NAMES = ["from", "to", "user", "group", "default", "name", "tag"]
         columns = datos.columns
         for col in columns :
             if col in NOT_SUPPORT_COLUMN_NAMES: 
