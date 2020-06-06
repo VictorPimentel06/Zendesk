@@ -11,7 +11,7 @@ class RedShift():
                                                                                                         host = os.environ['REDSHIFT_HOST'],
                                                                                                         port = os.environ['REDSHIFT_PORT']),
                                                                                                         connect_args = {'sslmode': 'prefer','options': '-csearch_path={}'.format(schema)},
-                                                                                                        echo = False, encoding = 'utf8')
+                                                                                                        echo = False, encoding = 'utf8', pool_pre_ping=True)
 
 class Upload_Redshift() :
     def __init__(self, Dataframe, name, carpeta, bucket, engine) :
@@ -24,6 +24,7 @@ class Upload_Redshift() :
             ejemplo: 
                 "prueba.csv"
         - bucket: bucket de AWS
+        - engine: objeto de sqlalchmey desde create_engine. 
         """
         s3 = boto3.client("s3",
             aws_access_key_id = os.environ["AWS_KEY"],
@@ -34,15 +35,15 @@ class Upload_Redshift() :
         s3.put_object(Bucket = bucket, Key = folder, Body = csv_buffer.getvalue())
     
         cols = Dataframe.columns
-        with engine.connect() as conn :
-            conn.execute("COPY {schema}.{table} ({cols}) FROM '{s3}' WITH CREDENTIALS 'aws_access_key_id={keyid};aws_secret_access_key={secretid}' CSV IGNOREHEADER 1 EMPTYASNULL;commit;".format(schema = os.environ['REDSHIFT_SCHEMA'], 
-                                                                                                                                                                                                    table = name,
-                                                                                                                                                                                                    cols = ', '.join(cols[j] for j in range( len(cols) ) ),
-                                                                                                                                                                                                    s3='s3://{}/{}/{}'.format(os.environ['AWS_BUCKET'],
-                                                                                                                                                                                                                              carpeta,
-                                                                                                                                                                                                                              name+".csv"),
-                                                                                                                                                                                                    keyid = os.environ['AWS_KEY'],
-                                                                                                                                                                                                    secretid= os.environ['AWS_SECRET_KEY']))
+
+        engine.execute("COPY {schema}.{table} ({cols}) FROM '{s3}' WITH CREDENTIALS 'aws_access_key_id={keyid};aws_secret_access_key={secretid}' CSV IGNOREHEADER 1 EMPTYASNULL;commit;".format(schema = os.environ['REDSHIFT_SCHEMA'], 
+                                                                                                                                                                                                table = name,
+                                                                                                                                                                                                cols = ', '.join(cols[j] for j in range( len(cols) ) ),
+                                                                                                                                                                                                s3='s3://{}/{}/{}'.format(os.environ['AWS_BUCKET'],
+                                                                                                                                                                                                                            carpeta,
+                                                                                                                                                                                                                            name+".csv"),
+                                                                                                                                                                                                keyid = os.environ['AWS_KEY'],
+                                                                                                                                                                                                secretid= os.environ['AWS_SECRET_KEY']))
         
     
 
@@ -76,9 +77,10 @@ class clean():
 
 class Initialize() :
     def __init__(self, name, engine) :
-        with engine.connect() as conn :
-            conn.execute("DROP TABLE IF EXISTS {} CASCADE".format(name))
-            conn.execute("CREATE TABLE {}(id character varying (1024) PRIMARY KEY)".format(name))
+        engine.execute("DROP TABLE IF EXISTS {} CASCADE".format(name))
+        engine.execute("CREATE TABLE {}(id character varying (1024) PRIMARY KEY)".format(name))
+
+            
 
 class New_columns(): 
     def __init__(self, tabla, name, engine):
