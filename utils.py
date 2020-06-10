@@ -95,7 +95,7 @@ class New_columns():
             "float64": "double precision",
             "object": "character varying (65535)"
         }
-        cols = tabla.columns
+        cols = [column.lower() for column in tabla.columns]
         try: 
             q = engine.execute("SELECT column_name FROM information_schema.columns WHERE table_name = '{}'".format(name))
             self.cols_db = [i[0] for i in q]
