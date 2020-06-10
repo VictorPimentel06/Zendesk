@@ -11,8 +11,8 @@ import time
 
 
 
-# fecha = str(date.today())
-fecha = "2020-06-01"
+fecha = str(date.today())
+# fecha = "2020-06-01"
 
 """
 El valor del search tiene que ser mayor o igual en le query de extraccion
@@ -108,7 +108,7 @@ def Comments(ids):
 def hilos(): 
     
     print("Comenzo Extraccion de Tickets")
-    instancia = Zendesk_support(table = "tickets", tipo = "partial", fecha = "2020-06-01")
+    instancia = Zendesk_support(table = "tickets", tipo = "partial", fecha = fecha)
     instancia.Tickets()
     instancia.Tickets_tags()
     print("Termino Extraccion de Tickets")
